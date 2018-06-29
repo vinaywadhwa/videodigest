@@ -121,7 +121,7 @@ if __name__ == '__main__':
     video_dst = args.output_video
     if not video_dst:
         base, ext = os.path.splitext(args.video_file)
-        dst = "{0}_summarized.mp4".format(base)
+        video_dst = "{0}_summarized.mp4".format(base)
 
     audio_dst = args.output_audio
     if not audio_dst:
