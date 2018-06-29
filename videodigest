@@ -29,6 +29,11 @@ SUMMARIZERS = {
     'lex-rank': LexRankSummarizer
 }
 
+def write_array_of_strings_to_file(array_of_strings, output_file):
+    with open(plain_text_dst,'w') as output_file:
+        for string_element in array_of_strings:
+            output_file.write("%s\n" % string_element)
+
 def create_summary(filename, regions):
     subclips = []
     input_video = VideoFileClip(filename)
@@ -61,31 +66,34 @@ def summarize(srt_file, summarizer, n_sentences, language):
     stemmer = Stemmer(language)
     summarizer = SUMMARIZERS[summarizer](stemmer)
     summarizer.stop_words = get_stop_words(language)
-    ret = []
+    srt_items = []
+    plain_text_summary = []
     for sentence in summarizer(parser.document, n_sentences):
         index = int(re.findall("\(([0-9]+)\)", str(sentence))[0])
+        plain_text_sentence = str(sentence).replace("(%d)"%index,"").strip()
+        plain_text_summary.append(plain_text_sentence)
         item = srt_file[index]
-        ret.append(srt_item_to_range(item))
-    return ret
+        srt_items.append(srt_item_to_range(item))
+    return srt_items,plain_text_summary
 
 def find_summary_regions(srt_filename, summarizer="lsa", duration=30, language="english"):
     srt_file = pysrt.open(srt_filename)
     avg_subtitle_duration = total_duration_of_regions(map(srt_item_to_range, srt_file))/len(srt_file)
     n_sentences = duration / avg_subtitle_duration
-    summary = summarize(srt_file, summarizer, n_sentences, language)
-    total_time = total_duration_of_regions(summary)
+    summary_srt_items,summary_plain_text = summarize(srt_file, summarizer, n_sentences, language)
+    total_time = total_duration_of_regions(summary_srt_items)
     try_higher = total_time < duration
     if try_higher:
         while total_time < duration:
             n_sentences += 1
-            summary = summarize(srt_file, summarizer, n_sentences, language)
-            total_time = total_duration_of_regions(summary)
+            summary_srt_items,summary_plain_text = summarize(srt_file, summarizer, n_sentences, language)
+            total_time = total_duration_of_regions(summary_srt_items)
     else:
         while total_time > duration:
             n_sentences -= 1
-            summary = summarize(srt_file, summarizer, n_sentences, language)
-            total_time = total_duration_of_regions(summary)
-    return summary
+            summary_srt_items,summary_plain_text = summarize(srt_file, summarizer, n_sentences, language)
+            total_time = total_duration_of_regions(summary_srt_items)
+    return summary_srt_items,summary_plain_text
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("videodigest: Automatic Video Summaries")
@@ -94,7 +102,9 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--duration', type=int, help="Duration of summary", default=60)
     parser.add_argument('-L', '--language', help="Language of subtitles", default="english")
     parser.add_argument('-S', '--summarizer', help="Auto-summarization algorithm ("+' | '.join(SUMMARIZERS.keys())+")", default="lsa")
-    parser.add_argument('-o', '--output', help="Output file")
+    parser.add_argument('-o', '--output_video', help="Output Video Summary File")
+    parser.add_argument('-ot', '--output_plain_text', help="Output Plain Text Summary File")
+    parser.add_argument('-oa', '--output_audio', help="Output Audio Summary File (Only the file name, file extensions, if any, will be ignored)")
 
     args = parser.parse_args()
 
@@ -102,22 +112,33 @@ if __name__ == '__main__':
         print 'Summarizer must be one of: ' + ', '.join(SUMMARIZERS.keys())
         sys.exit(1)
 
-    regions = find_summary_regions(args.subtitles_file,
+    summary_srt_items,plain_text_items = find_summary_regions(args.subtitles_file,
                                    summarizer=args.summarizer,
                                    duration=args.duration,
                                    language=args.language)
-    summary = create_summary(args.video_file, regions)
+    summary = create_summary(args.video_file, summary_srt_items)
 
-    dst = args.output
-    if not dst:
+    video_dst = args.output_video
+    if not video_dst:
         base, ext = os.path.splitext(args.video_file)
         dst = "{0}_summarized.mp4".format(base)
 
+    audio_dst = args.output_audio
+    if not audio_dst:
+        base, ext = os.path.splitext(args.video_file)
+        audio_dst = "{0}_summarized.m4a".format(base)
+    else:
+        base, ext = os.path.splitext(args.output_audio)
+        audio_dst = "{0}.m4a".format(base)
+        
     summary.to_videofile(
-        dst, 
+        video_dst, 
         codec="libx264", 
-        temp_audiofile="temp.m4a",
-        remove_temp=True,
+        temp_audiofile=audio_dst,
+        remove_temp=(args.output_audio==None),
         audio_codec="aac",
     )
 
+    plain_text_dst = args.output_plain_text
+    if plain_text_dst:
+        write_array_of_strings_to_file(plain_text_items,plain_text_dst)
